@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -16,7 +17,7 @@ func main() {
 
 	var listOfNamespaces []string
 
-	kubeconfig := acquireConfig()
+	kubeconfig := getConfig()
 
 	/*
 		Package clientcmd provides one stop shopping for building a working client from a fixed config,
@@ -40,10 +41,11 @@ func main() {
 
 	listOfNamespaces = getNamespaces(clientset)
 
-	fmt.Println(listOfNamespaces)
+	getPodsPerNamespace(listOfNamespaces, clientset)
+
 }
 
-func acquireConfig() *string {
+func getConfig() *string {
 
 	var kubeconfig *string
 
@@ -76,4 +78,23 @@ func getNamespaces(c *kubernetes.Clientset) []string {
 		listOfNamespaces = append(listOfNamespaces, namespace.Name)
 	}
 	return listOfNamespaces
+}
+
+func getPodsPerNamespace(namespaces []string, c *kubernetes.Clientset) {
+	for _, namespace := range namespaces {
+		pods, err := c.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+
+		if err != nil {
+			panic(err.Error())
+		}
+
+		for _, pod := range pods.Items {
+			for _, container := range pod.Spec.Containers {
+				if strings.Contains(container.Image, "latest") == true || strings.Contains(container.Image, ":") == false {
+					fmt.Println("Name:", container.Name, "Image:", container.Image)
+				}
+			}
+
+		}
+	}
 }
