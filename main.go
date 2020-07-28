@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -16,6 +17,7 @@ import (
 func main() {
 
 	var listOfNamespaces []string
+	var wg sync.WaitGroup
 
 	kubeconfig := getConfig()
 
@@ -23,10 +25,14 @@ func main() {
 		Package clientcmd provides one stop shopping for building a working client from a fixed config,
 		from a .kubeconfig file, from command line flags, or from any merged combination.
 	*/
+
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}
+
+	config.QPS = 1.0
+	config.Burst = 1
 
 	/*
 		NewForConfig creates a new Clientset for the given config.
@@ -39,10 +45,20 @@ func main() {
 		panic(err.Error())
 	}
 
-	listOfNamespaces = getNamespaces(clientset)
+	listOfNamespaces = []string{"default", "cattle-system", "nginx-system"}
 
-	getPodsPerNamespace(listOfNamespaces, clientset)
+	wg.Add(len(listOfNamespaces))
 
+	fmt.Println("adding", len(listOfNamespaces))
+
+	for _, namespace := range listOfNamespaces {
+		n := namespace
+		go func() {
+			getPodsPerNamespace(n, clientset)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
 
 func getConfig() *string {
@@ -68,6 +84,7 @@ func homeDir() string {
 func getNamespaces(c *kubernetes.Clientset) []string {
 	namespaces, err := c.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
 
+	//context := context
 	var listOfNamespaces []string
 
 	if err != nil {
@@ -80,21 +97,20 @@ func getNamespaces(c *kubernetes.Clientset) []string {
 	return listOfNamespaces
 }
 
-func getPodsPerNamespace(namespaces []string, c *kubernetes.Clientset) {
-	for _, namespace := range namespaces {
-		pods, err := c.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+func getPodsPerNamespace(namespace string, clientSet *kubernetes.Clientset) {
 
-		if err != nil {
-			panic(err.Error())
-		}
+	fmt.Println(namespace)
+	pods, err := clientSet.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 
-		for _, pod := range pods.Items {
-			for _, container := range pod.Spec.Containers {
-				if strings.Contains(container.Image, "latest") == true || strings.Contains(container.Image, ":") == false {
-					fmt.Println("Name:", container.Name, "Image:", container.Image)
-				}
+	if err != nil {
+		panic(err.Error())
+	}
+
+	for _, pod := range pods.Items {
+		for _, container := range pod.Spec.Containers {
+			if strings.Contains(container.Image, "latest") == true || strings.Contains(container.Image, ":") == false {
+				fmt.Println("Found!")
 			}
-
 		}
 	}
 }
