@@ -145,5 +145,6 @@ func displayWorkloads(w []identifiedWorkload) {
 		t.AppendSeparator()
 	}
 	t.SetStyle(table.StyleLight)
+	//render table
 	t.Render()
 }
