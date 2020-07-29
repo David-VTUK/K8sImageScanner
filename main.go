@@ -14,9 +14,16 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+type identifiedWorkload struct {
+	containerName, namespace, image string
+}
+
 func main() {
 
 	var listOfNamespaces []string
+	//var listOfWorkloads []identifiedWorkload
+	messages := make(chan identifiedWorkload, 10)
+
 	var wg sync.WaitGroup
 
 	kubeconfig := getConfig()
@@ -31,41 +38,39 @@ func main() {
 		panic(err.Error())
 	}
 
-	config.QPS = 1.0
-	config.Burst = 1
-
+	config.Burst = 50
+	config.QPS = 25
 	/*
 		NewForConfig creates a new Clientset for the given config.
 		If config's RateLimiter is not set and QPS and Burst are acceptable,
 		NewForConfig will generate a rate-limiter in configShallowCopy.
 	*/
 
-	config.Burst = 30
-	config.QPS = 15
-
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	listOfNamespaces = []string{"default", "cattle-system", "nginx-system"}
+	listOfNamespaces = getNamespaces(clientset)
 
 	wg.Add(len(listOfNamespaces))
 
-	fmt.Println("adding", len(listOfNamespaces))
-
 	for _, namespace := range listOfNamespaces {
-		n := namespace
-		go func() {
-			getPodsPerNamespace(n, clientset)
-			wg.Done()
-		}()
+		go func(n string) {
+			getPodsPerNamespace(n, clientset, messages)
+			defer wg.Done()
+		}(namespace)
 	}
 	wg.Wait()
+	close(messages)
+
+	for element := range messages {
+		fmt.Println(element.containerName)
+	}
+
 }
 
 func getConfig() *string {
-
 	var kubeconfig *string
 
 	if home := homeDir(); home != "" {
@@ -100,9 +105,8 @@ func getNamespaces(c *kubernetes.Clientset) []string {
 	return listOfNamespaces
 }
 
-func getPodsPerNamespace(namespace string, clientSet *kubernetes.Clientset) {
+func getPodsPerNamespace(namespace string, clientSet *kubernetes.Clientset, c chan identifiedWorkload) {
 
-	fmt.Println(namespace)
 	pods, err := clientSet.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 
 	if err != nil {
@@ -112,7 +116,13 @@ func getPodsPerNamespace(namespace string, clientSet *kubernetes.Clientset) {
 	for _, pod := range pods.Items {
 		for _, container := range pod.Spec.Containers {
 			if strings.Contains(container.Image, "latest") == true || strings.Contains(container.Image, ":") == false {
-				fmt.Println("Found!")
+				cont := identifiedWorkload{
+					containerName: container.Name,
+					namespace:     namespace,
+					image:         container.Image,
+				}
+				fmt.Println("in", cont.containerName)
+				c <- cont
 			}
 		}
 	}
