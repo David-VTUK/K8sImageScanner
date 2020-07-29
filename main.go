@@ -40,6 +40,9 @@ func main() {
 		NewForConfig will generate a rate-limiter in configShallowCopy.
 	*/
 
+	config.Burst = 30
+	config.QPS = 15
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
